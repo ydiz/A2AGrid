@@ -1,0 +1,10 @@
+*
+
+!*/
+!*.cc
+!*.h
+!*.C
+
+old_code
+
+!.gitignore
