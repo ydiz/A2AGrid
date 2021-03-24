@@ -42,8 +42,7 @@ public:
   void run_lanczos(const LanczosParams &lanc_arg);
   void load_evecs();
   void computeVWlow();
-  // void computeVWhigh(const CGParams_MADWF &cg_arg);
-  void computeVWhigh(const CGParams_MADWF &cg_arg, const std::string &save_path="");
+  void computeVWhigh(const CGParams_MADWF &cg_arg);
 };
 
 
@@ -95,44 +94,32 @@ void A2A_MADWF::load_evecs() {
   nl = evals.size();
   std::cout << "Number of eigenvectors: " << nl << std::endl;
   print_memory();
-
-
-
 }
 
 void A2A_MADWF::computeVWlow() {
 
   A2A::computeVWlow(*Dzmob); // call method of parent class, which has been "name hiding"
+  A2AVectorsIo::write(prefix + "/MADWF_A2AVector_vl", vl, false, traj);
+  A2AVectorsIo::write(prefix + "/MADWF_A2AVector_wl", wl, false, traj);
 
-
-  if(doTimeDilution) { // do not save A2A vectors for calculating Lxx
-    A2AVectorsIo::write(prefix + "/vl", vl, false, traj);
-    A2AVectorsIo::write(prefix + "/wl", wl, false, traj);
-
-    vl.clear();    // for calculating Lxx (no time dilution), do not clear vl, wl; need to use them to calculate Lxx; instead clear vl/wl outside
-    wl.clear();
-    print_memory();
-  }
-  // A2AVectorsIo::write(prefix + "/MADWF_A2AVector_vl", vl, false, traj);
-  // A2AVectorsIo::write(prefix + "/MADWF_A2AVector_wl", wl, false, traj);
-
-  // vl.clear();
-  // wl.clear();
-  // print_memory();
+  vl.clear();
+  wl.clear();
+  print_memory();
 }
 
 
-void A2A_MADWF::computeVWhigh(const CGParams_MADWF &cg_arg, const std::string &save_path /* ="" */) {
+void A2A_MADWF::computeVWhigh(const CGParams_MADWF &cg_arg) {
 
-   // assert(nl!=-1);  // make sure eigenvector have been read
-    if(nl == -1) std::cout << GridLogMessage << "!!!!! Not using eigenvectors" << std::endl;
-
+   assert(nl!=-1);
    // Inner CG (only appear in PV): Mixed precision CG; 
    // outer CG: single precision CG
 
    // CG_outer is used only for PV
-   ConjugateGradient<LatticeFermionD> CG_outer(cg_arg.resid_outer, cg_arg.max_iters); 
-   using PVtype = PauliVillarsSolverFourierAccel<LatticeFermionD, LatticeGaugeFieldD>;
+   // ConjugateGradient<LatticeFermionD> CG_outer(cg_arg.resid_outer, cg_arg.max_iters); 
+   using MixedCG = MixedPrecisionConjugateGradientOp<LatticeFermionD, LatticeFermionF>;
+   MixedCG CG_outer(cg_arg.resid_outer, cg_arg.max_iters, 50, mobFrbGrid_f, *mobHermOp_f, *mobHermOp);
+   // using PVtype = PauliVillarsSolverFourierAccel<LatticeFermionD, LatticeGaugeFieldD>;
+   using PVtype = PauliVillarsSolverFourierAccel<LatticeFermionD, LatticeGaugeFieldD, MixedCG>;
    PVtype PV_outer(Umu, CG_outer);
 
    // //Setup update control
@@ -145,7 +132,6 @@ void A2A_MADWF::computeVWhigh(const CGParams_MADWF &cg_arg, const std::string &s
         
    using GuessF = DeflatedGuesser<LatticeFermionF>;
    GuessF guesser_inner(evecs_f, evals);
-  // std::cout << "evecs_f[0].Grid()->_fdimensions: " << evecs_f[0].Grid()->_fdimensions << std::endl;
 
    MADWF<MobiusFermionD, ZMobiusFermionF, PVtype, SchurSolverF, GuessF> madwf(*Dmob, *Dzmob_f, PV_outer, SchurSolver_inner, guesser_inner, cg_arg.resid, 100);
 
@@ -159,49 +145,25 @@ void A2A_MADWF::computeVWhigh(const CGParams_MADWF &cg_arg, const std::string &s
     // wh is diluted random source
     wh[i] = getDilutedSource(i);
 
-    // LatticeFermionD eta(Dmob->FermionGrid()); // eta is actually D_- eta 
-    // Dmob->ImportPhysicalFermionSource(wh[i], eta); // Project to 5d and multiply it by D_-
-    // // std::cout << "eta.Grid()->_fdimensions: " << eta.Grid()->_fdimensions << std::endl;
+    LatticeFermionD eta(Dmob->FermionGrid()); // eta is actually D_- eta 
+    Dmob->ImportPhysicalFermionSource(wh[i], eta); // Project to 5d and multiply it by D_-
 
     // Calculate vh_5d = D^{-1} \eta
     LatticeFermionD vh_5d(Dmob->FermionGrid());
     // solver(*Dmob, eta, vh_5d);
-    madwf(wh[i], vh_5d);   // Input must be src4d, not src5d; projecting to 5d is done inside the function // Change 1: solver -> madwf
+    madwf(wh[i], vh_5d);   // Input must be src4d, not src5d// Change 1: solver -> madwf
 
     Dmob->ExportPhysicalFermionSolution(vh_5d, vh[i]); 
 
     // remove low mode contribution: (LDU) eta
-    if(nl != -1) {       // If using low modes
-      // LatticeFermionD lowmode_contrib = compute_lowmode_contrib(*Dzmob, guesser_inner, eta); // Change 2: Dmob -> Dzmob
-      LatticeFermionD lowmode_contrib = compute_lowmode_contrib(*Dzmob, guesser_inner, wh[i]); // Change 2: Dmob -> Dzmob
-      vh[i] -= lowmode_contrib;  // remove low mode contribution from vh
-    }
+    LatticeFermionD lowmode_contrib = compute_lowmode_contrib(*Dzmob, guesser_inner, eta); // Change 2: Dmob -> Dzmob
+    vh[i] -= lowmode_contrib;  // remove low mode contribution from vh
     
     vh[i] = (1. / nhits) * vh[i]; // including 1/nhit for the hit average
 
   }
-
-  if(!save_path.empty()) prefix = save_path;
-  if(doTimeDilution) {  // do not save A2A vectors for calculating Lxx
-    A2AVectorsIo::write(prefix + "/vh", vh, false, traj);
-    A2AVectorsIo::write(prefix + "/wh", wh, false, traj);
-  }
-  // else {   
-    // A2AVectorsIo::write(prefix + "/vh_no_timeDilution", vh, false, traj);
-    // A2AVectorsIo::write(prefix + "/wh_no_timeDilution", wh, false, traj);
-  // }
-
-
-
-  // if(!save_path.empty()) prefix = save_path;
-  // if(doTimeDilution) {
-  //   A2AVectorsIo::write(prefix + "/MADWF_A2AVector_vh", vh, false, traj);
-  //   A2AVectorsIo::write(prefix + "/MADWF_A2AVector_wh", wh, false, traj);
-  // }
-  // else {
-  //   A2AVectorsIo::write(prefix + "/MADWF_A2AVector_vh_no_timeDilution", vh, false, traj);
-  //   A2AVectorsIo::write(prefix + "/MADWF_A2AVector_wh_no_timeDilution", wh, false, traj);
-  // }
+  A2AVectorsIo::write(prefix + "/MADWF_A2AVector_vh", vh, false, traj);
+  A2AVectorsIo::write(prefix + "/MADWF_A2AVector_wh", wh, false, traj);
 }
 
 

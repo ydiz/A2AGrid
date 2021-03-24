@@ -21,13 +21,13 @@ int main (int argc, char ** argv)
   A2A_MADWF a2a(a2a_arg);
   a2a.setFermion(mob_arg, zmob_arg);
 
-  // a2a.load_evecs();
-  // a2a.load_compressed_evecs("/sdcc/u/dguo/evec/16I/lanczos.output");
-  a2a.load_compressed_evecs("/hpcgpfs01/work/lqcd/etap/dguo/evec/24ID/2300/lanczos.output");
-  test_evals_evecs(*a2a.zHermOp_f, a2a.evals, a2a.evecs_f);
+  // a2a.load_compressed_evecs("None");
+  // a2a.load_compressed_evecs("/hpcgpfs01/work/lqcd/qcdqedta/ydzhao/a2a/24ID/compressed_eigenvector/2300/lanczos.output");
+  // test_evals_evecs(*a2a.zHermOp_f, a2a.evals, a2a.evecs_f);
 
   // a2a.computeVWlow();
-  a2a.computeVWhigh(cg_arg);
+  string save_path = "/hpcgpfs01/work/lqcd/qcdqedta/ydzhao/a2a/24ID/only_high_modes";
+  a2a.computeVWhigh(cg_arg, save_path);
 
   Grid_finalize();
 }

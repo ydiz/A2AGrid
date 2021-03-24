@@ -20,11 +20,10 @@ int main (int argc, char ** argv)
   A2A_MADWF a2a(a2a_arg);
   a2a.setFermion(mob_arg, zmob_arg);
 
-
   a2a.load_evecs();
   test_evals_evecs(*a2a.zHermOp_f, a2a.evals, a2a.evecs_f);
 
-  a2a.computeVWlow();
+  // a2a.computeVWlow();
   a2a.computeVWhigh(cg_arg);
 
   Grid_finalize();

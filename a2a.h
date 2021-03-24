@@ -101,10 +101,11 @@ public:
   int Lt;
   int nl = -1;
   int nhits; // number of hits
-  int nh; // number of high modes   nh = nhits * T * 12
+  int nh; // number of high modes; with time dilution: nh = nhits * T * 12; without time dilution: nh = nhits * 12
   std::string prefix;
 
   int traj;
+  bool doTimeDilution;
 
   MobiusFermionD *Dmob = NULL; // D_{mobius}, mobius Dirac matrix
   MobiusFermionF *Dmob_f = NULL;
@@ -141,7 +142,8 @@ public:
   template<typename DiracMatrix>     // Examples of DiracMatrix: MobiusFermionD, ZMobiusFermionD
   void computeVWlow(DiracMatrix &Ddwf);
   
-  void computeVWhigh(const CGParams &cg_arg);
+  // void computeVWhigh(const CGParams &cg_arg);
+  void computeVWhigh(const CGParams &cg_arg, const std::string &save_path="");
 
   LatticeFermionD getDilutedSource(int idx);
 
@@ -149,7 +151,10 @@ public:
   LatticeFermionD compute_lowmode_contrib(DiracMatrix &Ddwf, DeflatedGuesser<LatticeFermionF> &guesser, const LatticeFermionD &eta);
 
 private:
-  void highModeIndexToTimeFlavorSpinColorIndex(int idx, int &hit, int &time_idx, int &spin_idx, int &color_idx);
+  void highModeIndexToSpinColorIndex(int idx, int &hit, int &spin_idx, int &color_idx);
+  void highModeIndexToTimeSpinColorIndex(int idx, int &hit, int &time_idx, int &spin_idx, int &color_idx);
+
+  void extractSpinColor(LatticeFermionD &ret, const LatticeComplexD &lat, int spin_idx, int color_idx);
   void extractTimeSpinColor(LatticeFermionD &ret, const LatticeComplexD &lat, int time_idx, int spin_idx, int color_idx);
 
 };
@@ -172,17 +177,25 @@ A2A::A2A(const A2AParams &a2a_arg) :
   Umu(UGrid), Umu_f(UGrid_f)
 {
   if(a2a_arg.config.empty()) Umu = 1.0;
-  // else readGaugeField(Umu, a2a_arg.config);
-  else readGaugeField(Umu_f, a2a_arg.config);
+  else readGaugeField(Umu, a2a_arg.config);
+  // else readGaugeField(Umu_f, a2a_arg.config);
 
-  // precisionChange(Umu_f, Umu);
-  precisionChange(Umu, Umu_f);
+  precisionChange(Umu_f, Umu);
+  // precisionChange(Umu, Umu_f);
 
   traj = a2a_arg.traj;
   Lt = a2a_arg.fdims[3];
   nhits = a2a_arg.nhits;
-  nh = a2a_arg.nhits * Lt * 12; // * 2; /// ??? Why 2? for Gparity ??
-  prefix = a2a_arg.prefix + "/" + a2a_arg.ensemble_name;
+  // prefix = a2a_arg.prefix + "/" + a2a_arg.ensemble_name;
+  prefix = a2a_arg.prefix;
+  doTimeDilution = a2a_arg.doTimeDilution;
+
+  if(doTimeDilution) {
+    nh = a2a_arg.nhits * Lt * 12; 
+  }
+  else {
+    nh = a2a_arg.nhits * 12;
+  }
 
   URNG.SeedFixedIntegers({1,2,3,4});
 }
@@ -241,32 +254,38 @@ void A2A::load_compressed_evecs(const std::string &evec_dir) {
 
   USING_NAMESPACE_CPS
 
-  typedef A2ApoliciesDoubleAutoAlloc A2Apolicies;
-  typedef A2Apolicies::FgridGFclass LatticeType;
-
-  DoArg do_arg;
-  if(!do_arg.Decode("do_arg.vml","do_arg")){
-    do_arg.Encode("do_arg.templ","do_arg");
-    VRB.Result("","main","Can't open do_arg.vml!\n");exit(1);
+  if(evec_dir == "None") {
+    nl = 0;
+    std::cout << "Not using eigenvectors" << std::endl;
   }
+  else {
+    typedef A2ApoliciesDoubleAutoAlloc A2Apolicies;
+    typedef A2Apolicies::FgridGFclass LatticeType;
 
-  int nthreads = omp_get_max_threads();
-  std::cout << "Number of threads " << nthreads << std::endl;
-  GJP.Initialize(do_arg);  // This sets the number of threads to 1
-  GJP.SetNthreads(nthreads);
-  std::cout << "Setting number of threads " << nthreads << std::endl;
+    DoArg do_arg;
+    if(!do_arg.Decode("do_arg.vml","do_arg")){
+      do_arg.Encode("do_arg.templ","do_arg");
+      VRB.Result("","main","Can't open do_arg.vml!\n");exit(1);
+    }
 
-  //Initialize FGrid
-  FgridParams fgp;
-  fgp.mobius_scale = 4.0; //b+c //FIXME: read from argument
-  LatticeType lattice(fgp);
-  lattice.ImportGauge();
+    int nthreads = omp_get_max_threads();
+    std::cout << "Number of threads " << nthreads << std::endl;
+    GJP.Initialize(do_arg);  // This sets the number of threads to 1
+    GJP.SetNthreads(nthreads);
+    std::cout << "Setting number of threads " << nthreads << std::endl;
 
-  std::cout << GridLogMessage << "Before reading compressed: " << nl << std::endl;
-  zyd_read_compressed(evec_dir, FGrid_f, FrbGrid_f, lattice, evals, evecs_f);
+    //Initialize FGrid
+    FgridParams fgp;
+    fgp.mobius_scale = 4.0; //b+c //FIXME: read from argument
+    LatticeType lattice(fgp);
+    lattice.ImportGauge();
 
-  nl = evals.size();
-  std::cout << "Number of eigenvectors: " << nl << std::endl;
+    std::cout << GridLogMessage << "Before reading compressed: " << nl << std::endl;
+    zyd_read_compressed(evec_dir, FGrid_f, FrbGrid_f, lattice, evals, evecs_f);
+
+    nl = evals.size();
+    std::cout << "Number of eigenvectors: " << nl << std::endl;
+  }
 }
 #endif
 
@@ -275,11 +294,20 @@ void A2A::load_compressed_evecs(const std::string &evec_dir) {
 void A2A::computeVWlow() {
   computeVWlow(*Dmob);
 
-  A2AVectorsIo::write(prefix + "/A2AVector_vl", vl, false, traj);
-  A2AVectorsIo::write(prefix + "/A2AVector_wl", wl, false, traj);
-  vl.clear();
-  wl.clear();
-  print_memory();
+  if(doTimeDilution) {  // do not save A2A vectors for calculating Lxx
+    A2AVectorsIo::write(prefix + "/vl", vl, false, traj);
+    A2AVectorsIo::write(prefix + "/wl", wl, false, traj);
+
+    vl.clear();    // for calculating Lxx (no time dilution), do not clear vl, wl; need to use them to calculate Lxx; instead clear vl/wl outside
+    wl.clear();
+    print_memory();
+  }
+  // A2AVectorsIo::write(prefix + "/vl", vl, false, traj);
+  // A2AVectorsIo::write(prefix + "/wl", wl, false, traj);
+
+  // vl.clear();
+  // wl.clear();
+  // print_memory();
 }
 
 template<typename DiracMatrix>     // Examples of DiracMatrix: MobiusFermionD, ZMobiusFermionD
@@ -308,7 +336,7 @@ void A2A::computeVWlow(DiracMatrix &Ddwf) {
     setCheckerboard(vl_5d, vl_5d_e);        assert(vl_5d_e.Checkerboard() == Even); 
 
     Ddwf.ExportPhysicalFermionSolution(vl_5d, vl[i]); // 5d->4d, v(x) = P_L v(x,0) + P_R v(x, Ls-1)
-    vl[i] = (1. / evals[i]) * vl[i];
+    vl[i] = (1. / evals[i]) * vl[i];   // include 1/lambda_i  in v[i]
 
     // calculate low modes of W
     // w_ie = - MeeInvDag MoeDag Mpc evec_i, where Mpc = D_oo M_oo^{-1}
@@ -328,6 +356,7 @@ void A2A::computeVWlow(DiracMatrix &Ddwf) {
     Ddwf.DminusDag(tmp_full, wl_5d); //Left-multiply by D-^dag. For Cayley fermion D_- = (1-c*DW); for other fermion, D_- = 1
 
     Ddwf.ExportPhysicalFermionSource(wl_5d, wl[i]); // 5d->4d, w(x) = P_R w(x,0) + P_L w(x, Ls-1)
+
   }
   std::cout << GridLogMessage << " Finished computing VW_low "<< std::endl;
 }
@@ -336,9 +365,11 @@ void A2A::computeVWlow(DiracMatrix &Ddwf) {
 
 
 
-void A2A::computeVWhigh(const CGParams &cg_arg) {
+void A2A::computeVWhigh(const CGParams &cg_arg, const std::string &save_path) {
 
-  assert(nl!=-1);
+  // assert(nl!=-1);
+  if(nl == -1) std::cout << GridLogMessage << "!!!!! Not using eigenvectors" << std::endl;
+
   
   MixedPrecisionConjugateGradientOp<LatticeFermionD, LatticeFermionF> mCG(cg_arg.resid, cg_arg.max_iters, 50, FrbGrid_f, *mobHermOp_f, *mobHermOp);
   DeflatedGuesser<LatticeFermionF> guesser(evecs_f, evals);
@@ -358,33 +389,55 @@ void A2A::computeVWhigh(const CGParams &cg_arg) {
 
     // Calculate vh_5d = D^{-1} \eta
     LatticeFermionD vh_5d(FGrid);
-    solver(*Dmob, eta, vh_5d);
+    solver(*Dmob, eta, vh_5d);  // zyd: Dmob is not used, but required for syntax
 
     Dmob->ExportPhysicalFermionSolution(vh_5d, vh[i]); // 5d->4d, v(x) = P_L v(x,0) + P_R v(x, Ls-1)
 
     // remove low mode contribution: (LDU) eta
-    LatticeFermionD lowmode_contrib = compute_lowmode_contrib(*Dmob, guesser, eta);
-    vh[i] -= lowmode_contrib;  // remove low mode contribution from vh
+    if(nl != -1) {       // If using low modes
+      // LatticeFermionD lowmode_contrib = compute_lowmode_contrib(*Dmob, guesser, eta);
+      LatticeFermionD lowmode_contrib = compute_lowmode_contrib(*Dmob, guesser, wh[i]);  // FIXME: I changed eta to wh[i]; has not checked if it is still right.
+      vh[i] -= lowmode_contrib;  // remove low mode contribution from vh
+    }
     
     vh[i] = (1. / nhits) * vh[i]; // including 1/nhit for the hit average
 
   }
-  A2AVectorsIo::write(prefix + "/A2AVector_vh", vh, false, traj);
-  A2AVectorsIo::write(prefix + "/A2AVector_wh", wh, false, traj);
+
+  if(!save_path.empty()) prefix = save_path;
+  if(doTimeDilution) {  // do not save A2A vectors for calculating Lxx
+    A2AVectorsIo::write(prefix + "/vh", vh, false, traj);
+    A2AVectorsIo::write(prefix + "/wh", wh, false, traj);
+  }
+  // else {   
+    // A2AVectorsIo::write(prefix + "/vh_no_timeDilution", vh, false, traj);
+    // A2AVectorsIo::write(prefix + "/wh_no_timeDilution", wh, false, traj);
+  // }
 }
 
 template<typename DiracMatrix>
-LatticeFermionD A2A::compute_lowmode_contrib(DiracMatrix &Ddwf, DeflatedGuesser<LatticeFermionF> &guesser, const LatticeFermionD &eta) {
+LatticeFermionD A2A::compute_lowmode_contrib(DiracMatrix &Ddwf, DeflatedGuesser<LatticeFermionF> &guesser, const LatticeFermionD &eta4d) {
   // eta must be 5d random source
   // The Ddwf operator must have correct Ls. For MADWF, its Ls should be inner Ls
+  //
+  // For A2A, the Ls of FrbGrid is Mobius Ls
+  // For A2A_MADWF, the Ls of FrbGrid is ZMobius Ls
 
   ConjugateGradient<LatticeFermionD> dummy_CG(1., 1.);  // This CG is not used; but it is necessary for the constructor of SchurRedBlackDiagTwoSolve
   SchurRedBlackDiagTwoSolve<LatticeFermionD> solver(dummy_CG);
 
   std::cout << GridLogMessage << "subtracting low modes contribution" << std::endl;
+  // std::cout << "eta4d.Grid()->_fdimensions: " << eta4d.Grid()->_fdimensions << std::endl;
+
+  LatticeFermionD eta(FGrid);
+  Ddwf.ImportPhysicalFermionSource(eta4d, eta); // Project to 5d and multiply it by D_-
+  // std::cout << "eta.Grid()->_fdimensions: " << eta.Grid()->_fdimensions << std::endl;
+
   LatticeFermionD Ueta_e(FrbGrid);         Ueta_e.Checkerboard() = Even; // U * eta
   LatticeFermionD Ueta_o(FrbGrid);         Ueta_o.Checkerboard() = Odd;
-  solver.RedBlackSource(Ddwf, eta, Ueta_e, Ueta_o);  
+  solver.RedBlackSource(Ddwf, eta, Ueta_e, Ueta_o); 
+
+  // std::cout << "Ueta_o.Grid()->_fdimensions: " << Ueta_o.Grid()->_fdimensions << std::endl;
 
   LatticeFermionF DUeta_o_f(FrbGrid_f);      DUeta_o_f.Checkerboard() = Odd;
   LatticeFermionF Ueta_o_f(FrbGrid_f);       Ueta_o_f.Checkerboard() = Odd;
@@ -392,6 +445,8 @@ LatticeFermionD A2A::compute_lowmode_contrib(DiracMatrix &Ddwf, DeflatedGuesser<
   // // converting eigenvectors to double is very slow; so I convert source to float. This is also what mixed CG does internally
   precisionChange(Ueta_o_f, Ueta_o);
   guesser(Ueta_o_f, DUeta_o_f);
+
+  // std::cout << "DUeta_o_f.Grid()->_fdimensions: " << DUeta_o_f.Grid()->_fdimensions << std::endl;
 
   LatticeFermionD DUeta_o(FrbGrid);
   precisionChange(DUeta_o, DUeta_o_f);
@@ -416,6 +471,8 @@ LatticeFermionD A2A::getDilutedSource(int idx) {
   static bool src_created = false;
   static std::vector<LatticeComplexD> rand;
   if(!src_created) {
+    std::cout << GridLogMessage << "Generating diluted sources" << std::endl;
+    // std::cout << GridLogMessage << "Number of hits: " << nhtis << std::endl;
     rand.assign(nhits, UGrid);
     for(int i=0; i<nhits; ++i) {     // use the same random number for every hit
       LatticeRealD rand_real(UGrid);     // tmp_real ~ uniform(0, 1)
@@ -426,14 +483,30 @@ LatticeFermionD A2A::getDilutedSource(int idx) {
   }
 
   LatticeFermionD src(UGrid);
-  int hit, t, s, c;
-  highModeIndexToTimeFlavorSpinColorIndex(idx, hit, t, s, c);
-  extractTimeSpinColor(src, rand[hit], t, s, c);
+  if(doTimeDilution) {
+    int hit, t, s, c;
+    highModeIndexToTimeSpinColorIndex(idx, hit, t, s, c);
+    extractTimeSpinColor(src, rand[hit], t, s, c);
+  }
+  else {     // no time dilution
+    int hit, s, c;
+    highModeIndexToSpinColorIndex(idx, hit, s, c);
+    extractSpinColor(src, rand[hit], s, c);
+  }
 
   return src;
 }
 
-void A2A::highModeIndexToTimeFlavorSpinColorIndex(int idx, int &hit, int &time_idx, int &spin_idx, int &color_idx)
+void A2A::highModeIndexToSpinColorIndex(int idx, int &hit, int &spin_idx, int &color_idx)
+{
+  int ncolor = 3;
+  int nspin = 4;
+  color_idx = idx % ncolor; idx /= ncolor;
+  spin_idx = idx % nspin; idx /= nspin;
+  hit = idx;
+}
+
+void A2A::highModeIndexToTimeSpinColorIndex(int idx, int &hit, int &time_idx, int &spin_idx, int &color_idx)
 {
   int T = UGrid->FullDimensions()[3];
   int ncolor = 3;
@@ -446,7 +519,28 @@ void A2A::highModeIndexToTimeFlavorSpinColorIndex(int idx, int &hit, int &time_i
 
 
 // for dilution
-// ret(x,t)|_{t=t0, f=f0,s=s0,c=c0)} = lat(x,t)|_{t=t0}, value only depends on time_idx, not spin and color index
+// ret(x,t)|_{s=s0,c=c0)} = lat(x,t), value dpes not depend on not spin and color dilutoin index
+void A2A::extractSpinColor(LatticeFermionD &ret, const LatticeComplexD &lat, int spin_idx, int color_idx)
+{
+  assert(ret.Grid()->Nd()==4 && lat.Grid()->Nd()==4); // must be 4d fermions
+
+  ret = Zero();  // set ret to 0
+  thread_for(ss, lat.Grid()->lSites(), {
+    Coordinate lcoor, gcoor;
+    localIndexToLocalGlobalCoor(lat.Grid(), ss, lcoor, gcoor);
+
+    typename LatticeFermionD::vector_object::scalar_object ret_site;
+    typename LatticeComplexD::vector_object::scalar_object lat_site;  
+    peekLocalSite(lat_site, lat, lcoor); // zyd: peekLocalSite is efficient; peekSite is not
+    ret_site()(spin_idx)(color_idx) = lat_site()()();
+    pokeLocalSite(ret_site, ret, lcoor);
+  });
+}
+
+
+
+// for dilution
+// ret(x,t)|_{t=t0, s=s0,c=c0)} = lat(x,t)|_{t=t0}, value only depends on time_idx, not spin and color index
 void A2A::extractTimeSpinColor(LatticeFermionD &ret, const LatticeComplexD &lat, int time_idx, int spin_idx, int color_idx)
 {
   assert(ret.Grid()->Nd()==4 && lat.Grid()->Nd()==4); // must be 4d fermions

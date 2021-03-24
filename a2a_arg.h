@@ -41,6 +41,7 @@ struct ZMobiusFermion_arg {
   ZMobiusFermion_arg(const std::string &ensemble) {
     if(ensemble == "16I") {  // ???? 16I is not Mobius ensemble?? maybe Duo made up those numbers??
       mass = 0.01;
+      // mass = 10;   // FIXME: for testing quark condensate
       M5 = 1.8;
       Ls_inner = 12;
 
@@ -123,126 +124,42 @@ public:
 
 struct A2AParams : Serializable {
 public:
-  std::vector<int> fdims; // lattice size
+  // std::vector<int> fdims; // lattice size
+    std::string config;
+    std::string evec_path;
+    int traj;
 
 public:
   GRID_SERIALIZABLE_CLASS_MEMBERS(A2AParams,
-    int, traj,
-    std::string, lat,
-    std::string, config,
+    // int, traj,
+    // std::string, lat,
+    std::vector<int>, fdims, // lattice size
+    std::string, config_prefix,
+    std::string, evec_prefix,
     int, nhits,
     std::string, ensemble_name,
-    std::string, prefix
+    std::string, prefix,
+    bool, doTimeDilution
   );
 
   template <class ReaderClass>
-  A2AParams(Reader<ReaderClass>& reader) {
+  A2AParams(int _traj, Reader<ReaderClass>& reader) {
+    traj = _traj;
+
     read(reader, "A2A", *this);
-    GridCmdOptionIntVector(lat, fdims);
-    std::cout << "fdims: " << fdims << std::endl;
+
+    // GridCmdOptionIntVector(lat, fdims);
+    config = config_prefix + "/ckpoint_lat." + std::to_string(traj);
+    evec_path = evec_prefix + "/" + std::to_string(traj) + "/lanczos.output";
+
+    std::cout << "trajectory: " << traj  << std::endl;
+    std::cout << "config path: " << config << std::endl;
+    std::cout << "evec path: " << evec_path << std::endl;
+
+    // std::cout << "fdims: " << fdims << std::endl;
     std::cout << *this << std::endl;
   }
 
 };
-
-// struct MADWFParams : Serializable {
-// public:
-//   GRID_SERIALIZABLE_CLASS_MEMBERS(MADWFParams,
-//     int, Ls_inner
-//   );
-//
-//   template <class ReaderClass>
-//   MADWFParams(Reader<ReaderClass>& reader) {
-//     read(reader, "MADWF", *this);
-//     std::cout << *this << std::endl;
-//   }
-//
-// };
-
-
-
-
-
-
-
-// struct CG_arg {
-//   double resid = 1.0e-8;
-//   unsigned int max_iters = 10000;
-// };
-//
-//
-// struct A2A_arg {
-//   int traj;
-//   int Ls;
-//   std::vector<int> lat; // lattice size
-//   std::string config;
-//   int nhits;
-//   std::string prefix;
-// };
-//
-// // Chris:
-// // double lo = lanc_arg.ch_beta * lanc_arg.ch_beta;
-// // double hi = lanc_arg.ch_alpha * lanc_arg.ch_alpha;
-// // int ord = lanc_arg.ch_ord + 1; //different conventions
-// // Grid::Chebyshev<GridFermionField> Cheb(lo,hi,ord);
-// struct Lanczos_arg {
-//   // For Chebyshev
-//   double ch_lo;
-//   double ch_hi;
-//   double ch_Npoly; 
-//
-//   // For Lanczos
-//   int Nstop; // N_true_get  // evecs.size() == lanc_arg.N_true_get
-//   int Nk; // N_get
-//   int Nm; // N_use
-//   int MaxIt; //MaxIt
-//   double resid;  //resid
-// };
-// struct Lanczos_arg {
-//   // For Chebyshev
-//   double ch_beta = std::sqrt(0.2);
-//   double ch_alpha = std::sqrt(5.0);
-//   double ch_ord = 10; //int ord = lanc_arg.ch_ord + 1; //different conventions
-//
-//   // For Lanczos
-//   int Nstop = 30; // N_true_get  // evecs.size() == lanc_arg.N_true_get
-//   int Nk = 40; // N_get
-//   int Nm = 80; // N_use
-//   int maxits = 10000; //MaxIt
-//   double stop_rsd = 1.0e-8;  //resid
-//
-//   // bool precon = true;
-// };
-// usage:
-// int Nstop;   // Number of evecs checked for convergence
-// int Nk;      // Number of converged sought
-// int Np;      // Np -- Number of spare vecs in kryloc space
-// int Nm;      // Nm -- total number of vectors
-/////////////////
-// const int Nstop = lanc_arg.N_true_get;
-// const int Nk = lanc_arg.N_get;
-// const int Np = lanc_arg.N_use - lanc_arg.N_get;
-// const int Nm = lanc_arg.N_use;
-// const int MaxIt= lanc_arg.maxits;
-// Grid::RealD resid = lanc_arg.stop_rsd;
-
-
-
-// std::ostream &operator<<(std::ostream& out, const Lanczos_arg & lanc_arg)
-// {
-//   out << "===========Chebyshev===========" << std::endl;
-//   out << "ch_beta: " << lanc_arg.ch_beta << std::endl;
-//   out << "ch_alpha: " << lanc_arg.ch_alpha << std::endl;
-//   out << "ch_ord; " << lanc_arg.ch_ord << std::endl;
-//   out << "===========Lanczos===========" << std::endl;
-//   out << "N_true_get: " << lanc_arg.N_true_get << std::endl;
-//   out << "N_get: " << lanc_arg.N_get << std::endl;
-//   out << "N_use: " << lanc_arg.N_use << std::endl;
-//   out << "maxits: " << lanc_arg.maxits << std::endl;
-//   out << "stop_rsd: " << lanc_arg.stop_rsd << std::endl;
-//   out << "precon: " << lanc_arg.precon << std::endl;
-//   return out;
-// }
-
 
 }
