@@ -1,38 +1,4 @@
-
 #pragma once
-
-// #include "mpi.h"
-// #include "stdio.h"
-// static int comm_counter=0;
-//
-// int MPI_Comm_dup(MPI_Comm comm, MPI_Comm *newcomm)
-// {
-//       int world_rank;
-//       MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-//       comm_counter++;
-//       printf("%s %i %s %i\n", "MPI_Comm_dup ", comm_counter, " from ", world_rank);
-//       return PMPI_Comm_dup(comm, newcomm);
-// }
-//
-//
-// int MPI_Comm_split(MPI_Comm comm, int color, int key, MPI_Comm *newcomm)
-// {
-//       int world_rank;
-//       MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-//       comm_counter++;
-//       printf("%s %i %s %i\n", "MPI_Comm_split ", comm_counter, " from ", world_rank);
-//       return PMPI_Comm_split(comm, color, key, newcomm);
-// }
-//
-// int MPI_Comm_free(MPI_Comm *comm)
-// {
-//       int world_rank;
-//       MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-//       comm_counter--;
-//       printf("%s %i %s %i\n", "PMPI_Comm_free ", comm_counter, " from ", world_rank);
-//       return PMPI_Comm_free(comm);
-// }
-
 
 #include <Grid/Grid.h>
 
@@ -40,10 +6,10 @@
 #include "a2a_arg.h"
 #include "a2a_utils.h"
 #include "lanczos.h"
-
-#ifdef USE_CPS
-#include "read_compressed.h"
-#endif
+#include "read_compressed_evec.h"
+// #ifdef USE_CPS
+// #include "read_compressed.h"
+// #endif
 
 namespace Grid{
 
@@ -132,9 +98,7 @@ public:
 
 
   void load_evecs();
-  #ifdef USE_CPS
   void load_compressed_evecs(const std::string &evec_dir);
-  #endif
 
 
   void computeVWlow();
@@ -178,10 +142,8 @@ A2A::A2A(const A2AParams &a2a_arg) :
 {
   if(a2a_arg.config.empty()) Umu = 1.0;
   else readGaugeField(Umu, a2a_arg.config);
-  // else readGaugeField(Umu_f, a2a_arg.config);
 
   precisionChange(Umu_f, Umu);
-  // precisionChange(Umu, Umu_f);
 
   traj = a2a_arg.traj;
   Lt = a2a_arg.fdims[3];
@@ -249,45 +211,14 @@ void A2A::load_evecs() {
   print_memory();
 }
 
-#ifdef USE_CPS
 void A2A::load_compressed_evecs(const std::string &evec_dir) {
 
-  USING_NAMESPACE_CPS
-
-  if(evec_dir == "None") {
-    nl = 0;
-    std::cout << "Not using eigenvectors" << std::endl;
-  }
-  else {
-    typedef A2ApoliciesDoubleAutoAlloc A2Apolicies;
-    typedef A2Apolicies::FgridGFclass LatticeType;
-
-    DoArg do_arg;
-    if(!do_arg.Decode("do_arg.vml","do_arg")){
-      do_arg.Encode("do_arg.templ","do_arg");
-      VRB.Result("","main","Can't open do_arg.vml!\n");exit(1);
-    }
-
-    int nthreads = omp_get_max_threads();
-    std::cout << "Number of threads " << nthreads << std::endl;
-    GJP.Initialize(do_arg);  // This sets the number of threads to 1
-    GJP.SetNthreads(nthreads);
-    std::cout << "Setting number of threads " << nthreads << std::endl;
-
-    //Initialize FGrid
-    FgridParams fgp;
-    fgp.mobius_scale = 4.0; //b+c //FIXME: read from argument
-    LatticeType lattice(fgp);
-    lattice.ImportGauge();
-
-    std::cout << GridLogMessage << "Before reading compressed: " << nl << std::endl;
-    zyd_read_compressed(evec_dir, FGrid_f, FrbGrid_f, lattice, evals, evecs_f);
-
-    nl = evals.size();
-    std::cout << "Number of eigenvectors: " << nl << std::endl;
-  }
+	int ngroups = 1;  // To save memory, Should be number of MPI processes per node
+	std::cout << GridLogMessage << "Before reading compressed: " << nl << std::endl;
+	zyd_read_compressed_evecs(evec_dir, FrbGrid_f, evecs_f, evals, ngroups); 
+	nl = evals.size();
+	std::cout << "Number of eigenvectors: " << nl << std::endl;
 }
-#endif
 
 
 
@@ -525,15 +456,19 @@ void A2A::extractSpinColor(LatticeFermionD &ret, const LatticeComplexD &lat, int
   assert(ret.Grid()->Nd()==4 && lat.Grid()->Nd()==4); // must be 4d fermions
 
   ret = Zero();  // set ret to 0
+
+  autoView(lat_v, lat, CpuRead);
+  autoView(ret_v, ret, CpuWrite);
+
   thread_for(ss, lat.Grid()->lSites(), {
     Coordinate lcoor, gcoor;
     localIndexToLocalGlobalCoor(lat.Grid(), ss, lcoor, gcoor);
 
     typename LatticeFermionD::vector_object::scalar_object ret_site;
     typename LatticeComplexD::vector_object::scalar_object lat_site;  
-    peekLocalSite(lat_site, lat, lcoor); // zyd: peekLocalSite is efficient; peekSite is not
+    peekLocalSite(lat_site, lat_v, lcoor); // zyd: peekLocalSite is efficient; peekSite is not
     ret_site()(spin_idx)(color_idx) = lat_site()()();
-    pokeLocalSite(ret_site, ret, lcoor);
+    pokeLocalSite(ret_site, ret_v, lcoor);
   });
 }
 
@@ -546,15 +481,19 @@ void A2A::extractTimeSpinColor(LatticeFermionD &ret, const LatticeComplexD &lat,
   assert(ret.Grid()->Nd()==4 && lat.Grid()->Nd()==4); // must be 4d fermions
 
   ret = Zero();  // set ret to 0
+
+  autoView(lat_v, lat, CpuRead);
+  autoView(ret_v, ret, CpuWrite);
+
   thread_for(ss, lat.Grid()->lSites(), {
     Coordinate lcoor, gcoor;
     localIndexToLocalGlobalCoor(lat.Grid(), ss, lcoor, gcoor);
     if(gcoor[3] == time_idx) {
       typename LatticeFermionD::vector_object::scalar_object ret_site;
       typename LatticeComplexD::vector_object::scalar_object lat_site;  
-      peekLocalSite(lat_site, lat, lcoor); // zyd: peekLocalSite is efficient; peekSite is not
+      peekLocalSite(lat_site, lat_v, lcoor); // zyd: peekLocalSite is efficient; peekSite is not
       ret_site()(spin_idx)(color_idx) = lat_site()()();
-      pokeLocalSite(ret_site, ret, lcoor);
+      pokeLocalSite(ret_site, ret_v, lcoor);
     }
   });
 }
