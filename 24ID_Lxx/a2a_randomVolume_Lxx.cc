@@ -1,3 +1,5 @@
+// Cori: for one configuration, it takes about ~14h to run
+
 #include "../a2a_MADWF.h"
 
 using namespace std;
@@ -9,8 +11,8 @@ int main (int argc, char ** argv)
   Grid_init(&argc,&argv);
   // cps::Start(&argc, &argv); // Grid_init(&argc,&argv) is called inside this function 
 
-  // string output_path = "/global/cfs/cdirs/mp13/ydzhao/24ID/Lxx";
-  string output_path = "."; // FIXME: for test
+  string output_path = "/global/cfs/cdirs/mp13/ydzhao/24ID/Lxx";
+  // string output_path = "."; // for test
 
   int traj;
   if( GridCmdOptionExists(argv, argv+argc, "--traj") ) {
